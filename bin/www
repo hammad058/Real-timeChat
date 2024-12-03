@@ -1,0 +1,95 @@
+const app = require('../app');
+const debug = require('debug')('socket-server:server');
+const http = require('http');
+const { Server } = require('socket.io'); // Import Socket.IO
+
+// Normalize and set the port
+const port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+// Create the HTTP server
+const server = http.createServer(app);
+
+// Initialize Socket.IO with CORS configuration
+const io = new Server(server, {
+    cors: {
+        origin: 'http://192.168.18.91:5173', // Frontend address (Vite dev server)
+        methods: ['GET', 'POST'], // Allowed HTTP methods
+    },
+});
+
+let users = {}; // Store users and their corresponding socket ids
+
+// Listen for Socket.IO connections
+io.on('connection', (socket) => {
+    console.log('A user connected:', socket.id);
+
+    // Listen for new user login and save their username and socket id
+    socket.on('user-joined', (username) => {
+        users[username] = socket.id; // Save username with socket id
+        console.log(`${username} joined, socket id: ${socket.id}`);
+    });
+
+    // Handle message sending between users
+    socket.on('message', (data) => {
+        const { to, message } = data;
+        const recipientSocketId = users[to]; // Find the socket id of the recipient
+        if (recipientSocketId) {
+            io.to(recipientSocketId).emit('message', {
+                user: data.user,
+                message: message,
+            }); // Emit the message to the recipient
+        } else {
+            console.log(`User ${to} not found`);
+        }
+    });
+
+    // Handle user disconnection
+    socket.on('disconnect', () => {
+        for (let username in users) {
+            if (users[username] === socket.id) {
+                delete users[username];
+                break;
+            }
+        }
+        console.log('User disconnected:', socket.id);
+    });
+});
+
+// Start the server
+server.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+});
+server.on('error', onError);
+server.on('listening', onListening);
+
+// Function to normalize port
+function normalizePort(val) {
+    const port = parseInt(val, 10);
+    if (isNaN(port)) return val; // Named pipe
+    if (port >= 0) return port; // Valid port number
+    return false;
+}
+
+// Error handler
+function onError(error) {
+    if (error.syscall !== 'listen') throw error;
+    const bind = typeof port === 'string' ? `Pipe ${port}` : `Port ${port}`;
+    switch (error.code) {
+        case 'EACCES':
+            console.error(`${bind} requires elevated privileges`);
+            process.exit(1);
+        case 'EADDRINUSE':
+            console.error(`${bind} is already in use`);
+            process.exit(1);
+        default:
+            throw error;
+    }
+}
+
+// Listening event
+function onListening() {
+    const addr = server.address();
+    const bind = typeof addr === 'string' ? `pipe ${addr}` : `port ${addr.port}`;
+    debug(`Listening on ${bind}`);
+}
